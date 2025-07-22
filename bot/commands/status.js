@@ -1,10 +1,9 @@
 const { Connection, PublicKey } = require("@solana/web3.js");
-const { MessageFlags } = require("discord.js");
 const { getWallet } = require("../../db");
 
 module.exports = {
   async execute(interaction) {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ ephemeral: true });
 
     try {
       const discordId = interaction.user.id;
@@ -17,35 +16,44 @@ module.exports = {
       }
 
       const publicKey = new PublicKey(walletAddress);
-      const connection = new Connection(process.env.SOLANA_RPC);
-
-      // Fetch last 3 transactions
-      const signatures = await connection.getConfirmedSignaturesForAddress2(
-        publicKey,
-        { limit: 3 }
+      const connection = new Connection(
+        process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com"
       );
 
-      const statusMessage =
-        signatures.length > 0
-          ? signatures
-              .map(
-                (sig, i) =>
-                  `${i + 1}. [\`${sig.signature.slice(
-                    0,
-                    8
-                  )}...\`](https://explorer.solana.com/tx/${sig.signature})`
-              )
-              .join("\n")
-          : "No recent transactions found";
+      // Fetch last 3 transactions using modern method
+      const signatures = await connection.getSignaturesForAddress(publicKey, {
+        limit: 3,
+      });
+
+      let statusMessage;
+      if (signatures.length === 0) {
+        statusMessage = "No recent transactions found";
+      } else {
+        statusMessage = signatures
+          .map(
+            (sig, i) =>
+              `${i + 1}. [\`${sig.signature.slice(0, 8)}...\`](${
+                sig.blockTime
+                  ? `https://solscan.io/tx/${sig.signature}`
+                  : `https://explorer.solana.com/tx/${sig.signature}`
+              }) - ${
+                sig.blockTime
+                  ? new Date(sig.blockTime * 1000).toLocaleDateString()
+                  : "Pending"
+              }`
+          )
+          .join("\n");
+      }
 
       await interaction.editReply({
-        content: `⏳ **Transaction History**:
-${statusMessage}`,
+        content: `⏳ **Transaction History for \`${publicKey
+          .toString()
+          .slice(0, 8)}...\`**:\n${statusMessage}`,
       });
     } catch (error) {
       console.error("Status Error:", error);
       await interaction.editReply({
-        content: "⚠️ Failed to fetch transaction history",
+        content: `⚠️ Failed to fetch transaction history: ${error.message}`,
       });
     }
   },
