@@ -6,6 +6,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  InteractionResponse,
 } = require("discord.js");
 const {
   PublicKey,
@@ -25,18 +26,21 @@ const SOLANA_RPC =
 
 module.exports = {
   async execute(interaction) {
-    try {
-      // Check if interaction is already handled
-      if (interaction.replied || interaction.deferred) {
-        return;
-      }
+    // Check if interaction is already handled
+    if (interaction.replied || interaction.deferred) {
+      console.warn("Interaction already handled");
+      return;
+    }
 
+    try {
       const wallet = await getWallet(interaction.user.id);
       if (!wallet) {
-        return await interaction.reply({
-          content: "❌ Please connect your wallet with `/connect` first",
-          ephemeral: true,
-        });
+        return interaction
+          .reply({
+            content: "❌ Please connect your wallet with `/connect` first",
+            ephemeral: true,
+          })
+          .catch(console.error);
       }
 
       const modal = new ModalBuilder()
@@ -66,27 +70,36 @@ module.exports = {
       await interaction.showModal(modal);
     } catch (error) {
       console.error("Modal Initialization Error:", error);
+
+      // Check if we can reply or need to follow up
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({
-          content: "🔧 Failed to initialize transaction form",
-          ephemeral: true,
-        });
+        await interaction
+          .reply({
+            content: "🔧 Failed to initialize transaction form",
+            ephemeral: true,
+          })
+          .catch(console.error);
       } else {
-        await interaction.followUp({
-          content: "🔧 Failed to initialize transaction form",
-          ephemeral: true,
-        });
+        await interaction
+          .followUp({
+            content: "🔧 Failed to initialize transaction form",
+            ephemeral: true,
+          })
+          .catch(console.error);
       }
     }
   },
 
   async handleModal(interaction) {
-    try {
-      // Defer the reply first to prevent timeout
-      if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferReply({ ephemeral: true });
-      }
+    // Immediately defer the reply to prevent timeout
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ ephemeral: true }).catch((error) => {
+        console.error("Failed to defer reply:", error);
+        return;
+      });
+    }
 
+    try {
       // Parse and validate inputs
       const recipientAddress = interaction.fields
         .getTextInputValue("recipientAddress")
@@ -107,12 +120,17 @@ module.exports = {
       }
 
       // Validate addresses
-      const recipient = new PublicKey(recipientAddress);
-      const senderWallet = await getWallet(interaction.user.id);
-      const sender = new PublicKey(senderWallet);
+      let recipient, sender;
+      try {
+        recipient = new PublicKey(recipientAddress);
+        const senderWallet = await getWallet(interaction.user.id);
+        sender = new PublicKey(senderWallet);
 
-      if (recipient.equals(sender)) {
-        throw new Error("SELF_TRANSFER");
+        if (recipient.equals(sender)) {
+          throw new Error("SELF_TRANSFER");
+        }
+      } catch (error) {
+        throw new Error("INVALID_ADDRESS");
       }
 
       // Prepare transaction
@@ -143,32 +161,18 @@ module.exports = {
         .setTitle("⚠️ Confirm Transaction")
         .setColor(0xf5a623)
         .addFields(
-          {
-            name: "From",
-            value: `\`${sender.toString()}\``,
-            inline: true,
-          },
-          {
-            name: "To",
-            value: `\`${recipient.toString()}\``,
-            inline: true,
-          },
-          {
-            name: "Amount",
-            value: `◎${solAmount.toFixed(4)} SOL`,
-            inline: true,
-          },
+          { name: "From", value: `\`${sender.toString()}\`` },
+          { name: "To", value: `\`${recipient.toString()}\`` },
+          { name: "Amount", value: `◎${solAmount.toFixed(4)} SOL` },
           {
             name: "Network Fee",
             value: `◎${(fee.value / LAMPORTS_PER_SOL).toFixed(4)} SOL`,
-            inline: true,
           },
           {
             name: "Total",
             value: `◎${(solAmount + fee.value / LAMPORTS_PER_SOL).toFixed(
               4
             )} SOL`,
-            inline: true,
           }
         )
         .setFooter({
@@ -206,17 +210,21 @@ module.exports = {
 
       const errorMessage = errorMap[error.message] || errorMap.DEFAULT;
 
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({
-          content: errorMessage,
-          embeds: [],
-          components: [],
-        });
-      } else {
-        await interaction.reply({
-          content: errorMessage,
-          ephemeral: true,
-        });
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({
+            content: errorMessage,
+            embeds: [],
+            components: [],
+          });
+        } else {
+          await interaction.reply({
+            content: errorMessage,
+            ephemeral: true,
+          });
+        }
+      } catch (err) {
+        console.error("Failed to send error message:", err);
       }
     }
   },
@@ -265,25 +273,16 @@ module.exports = {
 
       const transaction = new VersionedTransaction(message);
 
-      // In a real implementation, you would:
-      // 1. Get the user's wallet (from your database)
-      // 2. Sign the transaction with their private key
-      // 3. Send the signed transaction to the network
-
-      // For now, we'll simulate a successful transaction
+      // Simulate transaction success
       const successEmbed = new EmbedBuilder()
         .setTitle("✅ Transaction Successful")
         .setColor(0x2ecc71)
         .addFields(
-          { name: "From", value: `\`${sender}\``, inline: true },
-          { name: "To", value: `\`${recipient}\``, inline: true },
-          { name: "Amount", value: `◎${amount.toFixed(4)} SOL`, inline: true },
-          {
-            name: "Network Fee",
-            value: `◎${fee.toFixed(4)} SOL`,
-            inline: true,
-          },
-          { name: "Status", value: "Confirmed", inline: true }
+          { name: "From", value: `\`${sender}\`` },
+          { name: "To", value: `\`${recipient}\`` },
+          { name: "Amount", value: `◎${amount.toFixed(4)} SOL` },
+          { name: "Network Fee", value: `◎${fee.toFixed(4)} SOL` },
+          { name: "Status", value: "Confirmed" }
         )
         .setFooter({ text: "Transaction simulated for development purposes" });
 
@@ -300,10 +299,14 @@ module.exports = {
         .setDescription(`Error: ${error.message}`)
         .setFooter({ text: "Please try again or contact support" });
 
-      await interaction.editReply({
-        embeds: [errorEmbed],
-        components: [],
-      });
+      try {
+        await interaction.editReply({
+          embeds: [errorEmbed],
+          components: [],
+        });
+      } catch (err) {
+        console.error("Failed to send error message:", err);
+      }
     }
   },
 };
