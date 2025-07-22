@@ -45,6 +45,9 @@ client.on("interactionCreate", async (interaction) => {
       if (interaction.customId === "bundleModal") {
         require("./commands/bundle").handleModal(interaction);
       }
+      if (interaction.customId.startsWith("confirmBundle_")) {
+        require("./commands/bundle").handleConfirmation(interaction);
+      }
       return;
     }
 
