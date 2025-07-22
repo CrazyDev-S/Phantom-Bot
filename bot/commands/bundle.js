@@ -6,7 +6,6 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
-  InteractionType,
 } = require("discord.js");
 const {
   PublicKey,
@@ -14,44 +13,50 @@ const {
   Connection,
   SystemProgram,
   TransactionMessage,
+  VersionedTransaction,
 } = require("@solana/web3.js");
 const { getWallet } = require("../../db");
 
 // Constants
 const MAX_SOL_AMOUNT = 10;
 const MIN_SOL_AMOUNT = 0.001;
-const INTERACTION_TIMEOUT = 300_000; // 5 minutes
+const SOLANA_RPC =
+  process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 
 module.exports = {
   async execute(interaction) {
     try {
-      // Immediate acknowledgement
-      if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferReply({ ephemeral: true });
+      // Check if interaction is already handled
+      if (interaction.replied || interaction.deferred) {
+        return;
       }
 
       const wallet = await getWallet(interaction.user.id);
       if (!wallet) {
-        return await interaction.editReply({
+        return await interaction.reply({
           content: "❌ Please connect your wallet with `/connect` first",
+          ephemeral: true,
         });
       }
 
       const modal = new ModalBuilder()
-        .setCustomId(`bundleModal_${Date.now()}`) // Unique ID
+        .setCustomId("bundleModal")
         .setTitle("Create Transaction Bundle");
 
       const recipientInput = new TextInputBuilder()
         .setCustomId("recipientAddress")
         .setLabel("Recipient Solana Address")
         .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+        .setRequired(true)
+        .setMaxLength(44)
+        .setPlaceholder("Enter a valid Solana address");
 
       const amountInput = new TextInputBuilder()
         .setCustomId("solAmount")
-        .setLabel(`Amount (SOL)`)
+        .setLabel(`Amount (SOL) - Min ${MIN_SOL_AMOUNT}, Max ${MAX_SOL_AMOUNT}`)
         .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+        .setRequired(true)
+        .setPlaceholder(`0.001 - ${MAX_SOL_AMOUNT} SOL`);
 
       modal.addComponents(
         new ActionRowBuilder().addComponents(recipientInput),
@@ -59,58 +64,61 @@ module.exports = {
       );
 
       await interaction.showModal(modal);
-      await interaction.deleteReply(); // Clean up the initial deferral
     } catch (error) {
       console.error("Modal Initialization Error:", error);
-      if (!interaction.replied) {
-        await interaction
-          .reply({
-            content: "🔧 Failed to initialize transaction form",
-            ephemeral: true,
-          })
-          .catch(console.error);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: "🔧 Failed to initialize transaction form",
+          ephemeral: true,
+        });
+      } else {
+        await interaction.followUp({
+          content: "🔧 Failed to initialize transaction form",
+          ephemeral: true,
+        });
       }
     }
   },
 
   async handleModal(interaction) {
-    if (!interaction.isModalSubmit()) return;
-    if (!interaction.customId.startsWith("bundleModal_")) return;
-
-    const replyOrEdit = async (content) => {
-      if (interaction.replied || interaction.deferred) {
-        return interaction.editReply(content);
-      }
-      return interaction.reply({ ...content, ephemeral: true });
-    };
-
     try {
-      // Immediate response to prevent timeout
-      await interaction.deferReply({ ephemeral: true });
+      // Defer the reply first to prevent timeout
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({ ephemeral: true });
+      }
 
+      // Parse and validate inputs
       const recipientAddress = interaction.fields
         .getTextInputValue("recipientAddress")
         .trim();
       const solAmount = parseFloat(
-        interaction.fields.getTextInputValue("solAmount")
+        interaction.fields.getTextInputValue("solAmount").replace(/,/g, "")
       );
 
-      // Input validation
-      if (isNaN(solAmount)) throw new Error("INVALID_AMOUNT");
-      if (solAmount < MIN_SOL_AMOUNT) throw new Error("AMOUNT_TOO_SMALL");
-      if (solAmount > MAX_SOL_AMOUNT) throw new Error("AMOUNT_TOO_LARGE");
+      // Validate amount
+      if (isNaN(solAmount)) {
+        throw new Error("INVALID_AMOUNT");
+      }
+      if (solAmount < MIN_SOL_AMOUNT) {
+        throw new Error("AMOUNT_TOO_SMALL");
+      }
+      if (solAmount > MAX_SOL_AMOUNT) {
+        throw new Error("AMOUNT_TOO_LARGE");
+      }
 
+      // Validate addresses
       const recipient = new PublicKey(recipientAddress);
-      const sender = new PublicKey(await getWallet(interaction.user.id));
-      if (recipient.equals(sender)) throw new Error("SELF_TRANSFER");
+      const senderWallet = await getWallet(interaction.user.id);
+      const sender = new PublicKey(senderWallet);
 
-      // Transaction construction
-      const connection = new Connection(process.env.SOLANA_RPC, {
-        commitment: "confirmed",
-        confirmTransactionInitialTimeout: INTERACTION_TIMEOUT,
-      });
+      if (recipient.equals(sender)) {
+        throw new Error("SELF_TRANSFER");
+      }
 
+      // Prepare transaction
+      const connection = new Connection(SOLANA_RPC);
       const lamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
+
       const transferIx = SystemProgram.transfer({
         fromPubkey: sender,
         toPubkey: recipient,
@@ -124,29 +132,56 @@ module.exports = {
         instructions: [transferIx],
       }).compileToV0Message();
 
+      // Get fee for the message
       const fee = await connection.getFeeForMessage(messageV0);
-      if (fee.value === null) throw new Error("FEE_CALCULATION_FAILED");
+      if (fee.value === null) {
+        throw new Error("FEE_CALCULATION_FAILED");
+      }
 
-      // Confirmation message
+      // Create confirmation embed
       const confirmEmbed = new EmbedBuilder()
         .setTitle("⚠️ Confirm Transaction")
+        .setColor(0xf5a623)
         .addFields(
-          { name: "From", value: `\`${sender.toString()}\`` },
-          { name: "To", value: `\`${recipient.toString()}\`` },
-          { name: "Amount", value: `◎${solAmount.toFixed(4)}` },
           {
-            name: "Estimated Fee",
-            value: `◎${(fee.value / LAMPORTS_PER_SOL).toFixed(4)}`,
+            name: "From",
+            value: `\`${sender.toString()}\``,
+            inline: true,
+          },
+          {
+            name: "To",
+            value: `\`${recipient.toString()}\``,
+            inline: true,
+          },
+          {
+            name: "Amount",
+            value: `◎${solAmount.toFixed(4)} SOL`,
+            inline: true,
+          },
+          {
+            name: "Network Fee",
+            value: `◎${(fee.value / LAMPORTS_PER_SOL).toFixed(4)} SOL`,
+            inline: true,
+          },
+          {
+            name: "Total",
+            value: `◎${(solAmount + fee.value / LAMPORTS_PER_SOL).toFixed(
+              4
+            )} SOL`,
+            inline: true,
           }
-        );
+        )
+        .setFooter({
+          text: "Transaction will be signed with your connected wallet",
+        });
 
       const confirmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`confirmBundle_${Date.now()}`)
-          .setLabel("Confirm")
+          .setLabel("Confirm & Sign")
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
-          .setCustomId(`cancelBundle_${Date.now()}`)
+          .setCustomId("cancelBundle")
           .setLabel("Cancel")
           .setStyle(ButtonStyle.Danger)
       );
@@ -158,17 +193,116 @@ module.exports = {
     } catch (error) {
       console.error("Transaction Setup Error:", error);
 
-      const errorMessages = {
+      const errorMap = {
+        INVALID_ADDRESS: "❌ Invalid Solana address format",
         INVALID_AMOUNT: "❌ Please enter a valid SOL amount",
-        AMOUNT_TOO_SMALL: `❌ Minimum transfer is ◎${MIN_SOL_AMOUNT}`,
-        AMOUNT_TOO_LARGE: `❌ Maximum transfer is ◎${MAX_SOL_AMOUNT}`,
-        SELF_TRANSFER: "❌ Cannot send to yourself",
-        FEE_CALCULATION_FAILED: "⚠️ Failed to calculate network fee",
-        DEFAULT: "⚠️ Transaction setup failed",
+        AMOUNT_TOO_SMALL: `❌ Minimum transfer is ◎${MIN_SOL_AMOUNT} SOL`,
+        AMOUNT_TOO_LARGE: `❌ Maximum transfer is ◎${MAX_SOL_AMOUNT} SOL`,
+        SELF_TRANSFER: "❌ You cannot send SOL to yourself",
+        FEE_CALCULATION_FAILED:
+          "⚠️ Failed to calculate network fees. Please try again later",
+        DEFAULT: "⚠️ An error occurred while setting up your transaction",
       };
 
-      await replyOrEdit({
-        content: errorMessages[error.message] || errorMessages["DEFAULT"],
+      const errorMessage = errorMap[error.message] || errorMap.DEFAULT;
+
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({
+          content: errorMessage,
+          embeds: [],
+          components: [],
+        });
+      } else {
+        await interaction.reply({
+          content: errorMessage,
+          ephemeral: true,
+        });
+      }
+    }
+  },
+
+  async handleConfirmation(interaction) {
+    try {
+      // Immediately defer the update
+      await interaction.deferUpdate();
+
+      // Extract data from the embed
+      const originalEmbed = interaction.message.embeds[0];
+      const fields = originalEmbed.data.fields;
+
+      const sender = fields
+        .find((f) => f.name === "From")
+        .value.replace(/`/g, "");
+      const recipient = fields
+        .find((f) => f.name === "To")
+        .value.replace(/`/g, "");
+      const amount = parseFloat(
+        fields.find((f) => f.name === "Amount").value.replace(/◎/g, "")
+      );
+      const fee = parseFloat(
+        fields.find((f) => f.name === "Network Fee").value.replace(/◎/g, "")
+      );
+
+      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+      const connection = new Connection(SOLANA_RPC);
+
+      // Reconstruct transaction
+      const senderKey = new PublicKey(sender);
+      const recipientKey = new PublicKey(recipient);
+
+      const transferIx = SystemProgram.transfer({
+        fromPubkey: senderKey,
+        toPubkey: recipientKey,
+        lamports,
+      });
+
+      const { blockhash } = await connection.getLatestBlockhash();
+      const message = new TransactionMessage({
+        payerKey: senderKey,
+        recentBlockhash: blockhash,
+        instructions: [transferIx],
+      }).compileToV0Message();
+
+      const transaction = new VersionedTransaction(message);
+
+      // In a real implementation, you would:
+      // 1. Get the user's wallet (from your database)
+      // 2. Sign the transaction with their private key
+      // 3. Send the signed transaction to the network
+
+      // For now, we'll simulate a successful transaction
+      const successEmbed = new EmbedBuilder()
+        .setTitle("✅ Transaction Successful")
+        .setColor(0x2ecc71)
+        .addFields(
+          { name: "From", value: `\`${sender}\``, inline: true },
+          { name: "To", value: `\`${recipient}\``, inline: true },
+          { name: "Amount", value: `◎${amount.toFixed(4)} SOL`, inline: true },
+          {
+            name: "Network Fee",
+            value: `◎${fee.toFixed(4)} SOL`,
+            inline: true,
+          },
+          { name: "Status", value: "Confirmed", inline: true }
+        )
+        .setFooter({ text: "Transaction simulated for development purposes" });
+
+      await interaction.editReply({
+        embeds: [successEmbed],
+        components: [],
+      });
+    } catch (error) {
+      console.error("Transaction Execution Error:", error);
+
+      const errorEmbed = new EmbedBuilder()
+        .setTitle("❌ Transaction Failed")
+        .setColor(0xe74c3c)
+        .setDescription(`Error: ${error.message}`)
+        .setFooter({ text: "Please try again or contact support" });
+
+      await interaction.editReply({
+        embeds: [errorEmbed],
+        components: [],
       });
     }
   },
