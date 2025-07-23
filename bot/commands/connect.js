@@ -36,7 +36,7 @@ module.exports = {
       await saveWallet(discordId, publicKey, encryptedPrivateKey);
 
       // Alternative Phantom connection handler
-      const connectUrl = `${process.env.SERVER_URL}/phantom/connect?discord_id=${discordId}`;
+      const connectUrl = `${process.env.SERVER_URL}/phantom/auto-connect?discord_id=${discordId}`;
 
       await interaction.editReply({
         content:
