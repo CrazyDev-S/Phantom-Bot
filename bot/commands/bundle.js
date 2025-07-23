@@ -14,8 +14,11 @@ const {
   SystemProgram,
   TransactionMessage,
   VersionedTransaction,
+  Keypair,
+  sendAndConfirmTransaction,
 } = require("@solana/web3.js");
-const { getWallet } = require("../../db");
+const { getWallet, getWalletDetails, storeTransaction } = require("../../db");
+const { decrypt } = require("../../utils/crypto"); // You'll need to implement this
 
 // Constants
 const MAX_SOL_AMOUNT = 10;
@@ -125,7 +128,8 @@ module.exports = {
         lamports,
       });
 
-      const { blockhash } = await connection.getLatestBlockhash();
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash();
       const messageV0 = new TransactionMessage({
         payerKey: sender,
         recentBlockhash: blockhash,
@@ -175,9 +179,22 @@ module.exports = {
           text: "Transaction will be signed with your connected wallet",
         });
 
+      // Store transaction data in customId for later retrieval
+      const transactionData = JSON.stringify({
+        sender: sender.toString(),
+        recipient: recipient.toString(),
+        amount: solAmount,
+        fee: fee.value / LAMPORTS_PER_SOL,
+        blockhash,
+        lastValidBlockHeight,
+        lamports,
+      });
+
       const confirmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`confirmBundle_${Date.now()}`)
+          .setCustomId(
+            `confirmBundle_${Buffer.from(transactionData).toString("base64")}`
+          )
           .setLabel("Confirm & Sign")
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
@@ -234,24 +251,23 @@ module.exports = {
           embeds: [],
         });
       }
-      // Extract data from the embed
-      const originalEmbed = interaction.message.embeds[0];
-      const fields = originalEmbed.data.fields;
 
-      const sender = fields
-        .find((f) => f.name === "From")
-        .value.replace(/`/g, "");
-      const recipient = fields
-        .find((f) => f.name === "To")
-        .value.replace(/`/g, "");
-      const amount = parseFloat(
-        fields.find((f) => f.name === "Amount").value.replace(/◎/g, "")
-      );
-      const fee = parseFloat(
-        fields.find((f) => f.name === "Network Fee").value.replace(/◎/g, "")
+      // Extract transaction data from customId
+      const base64Data = interaction.customId.replace("confirmBundle_", "");
+      const transactionData = JSON.parse(
+        Buffer.from(base64Data, "base64").toString()
       );
 
-      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+      const {
+        sender,
+        recipient,
+        amount,
+        fee,
+        blockhash,
+        lastValidBlockHeight,
+        lamports,
+      } = transactionData;
+
       const connection = new Connection(SOLANA_RPC);
 
       // Reconstruct transaction
@@ -264,7 +280,6 @@ module.exports = {
         lamports,
       });
 
-      const { blockhash } = await connection.getLatestBlockhash();
       const message = new TransactionMessage({
         payerKey: senderKey,
         recentBlockhash: blockhash,
@@ -273,12 +288,49 @@ module.exports = {
 
       const transaction = new VersionedTransaction(message);
 
-      // In a real implementation, you would:
-      // 1. Get the user's wallet (from your database)
-      // 2. Sign the transaction with their private key
-      // 3. Send the signed transaction to the network
+      // Get user's encrypted private key from database
+      const walletDetails = await getWalletDetails(interaction.user.id);
+      if (!walletDetails || !walletDetails.encryptedPrivateKey) {
+        throw new Error("Wallet details not found");
+      }
 
-      // For now, we'll simulate a successful transaction
+      // Decrypt private key (you need to implement this)
+      const privateKey = decrypt(
+        walletDetails.encryptedPrivateKey,
+        process.env.ENCRYPTION_KEY
+      );
+
+      // Create keypair from decrypted private key
+      const keypair = Keypair.fromSecretKey(Uint8Array.from(privateKey));
+
+      // Sign the transaction
+      transaction.sign([keypair]);
+
+      // Send transaction to Solana network
+      const signature = await connection.sendTransaction(transaction);
+
+      // Confirm transaction
+      const confirmation = await connection.confirmTransaction(
+        {
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+
+      // Store transaction in database
+      await storeTransaction({
+        discordId: interaction.user.id,
+        signature,
+        amount: parseFloat(amount),
+        fee: parseFloat(fee),
+        senderAddress: sender,
+        recipientAddress: recipient,
+        status: confirmation.value.err ? "failed" : "confirmed",
+      });
+
+      // Create success embed
       const successEmbed = new EmbedBuilder()
         .setTitle("✅ Transaction Successful")
         .setColor(0x2ecc71)
@@ -291,9 +343,15 @@ module.exports = {
             value: `◎${fee.toFixed(4)} SOL`,
             inline: true,
           },
-          { name: "Status", value: "Confirmed", inline: true }
+          {
+            name: "Signature",
+            value: `[View on Explorer](https://explorer.solana.com/tx/${signature})`,
+            inline: false,
+          }
         )
-        .setFooter({ text: "Transaction simulated for development purposes" });
+        .setFooter({
+          text: `Status: ${confirmation.value.err ? "Failed" : "Confirmed"}`,
+        });
 
       await interaction.editReply({
         embeds: [successEmbed],

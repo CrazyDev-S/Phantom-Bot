@@ -33,4 +33,43 @@ async function getWallet(discordId) {
   }
 }
 
-module.exports = { saveWallet, getWallet };
+// Add these functions to your db.js file
+async function getWalletDetails(discordId) {
+  // Implementation to get wallet details including encrypted private key
+  // Example:
+  return db.query("SELECT * FROM wallets WHERE discord_id = $1", [discordId]);
+}
+
+async function storeTransaction(transaction) {
+  // Implementation to store transaction in database
+  // Example:
+  //   /*
+  return db.query(
+    `INSERT INTO transactions (
+        discord_id, 
+        signature, 
+        amount, 
+        fee, 
+        sender_address, 
+        recipient_address, 
+        status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      transaction.discordId,
+      transaction.signature,
+      transaction.amount,
+      transaction.fee,
+      transaction.senderAddress,
+      transaction.recipientAddress,
+      transaction.status,
+    ]
+  );
+  // */
+}
+
+module.exports = {
+  getWallet,
+  getWalletDetails,
+  storeTransaction,
+  saveWallet,
+};
