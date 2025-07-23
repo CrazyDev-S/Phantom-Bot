@@ -6,12 +6,25 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// Wallet functions
-async function saveWallet(discordId, publicKey, encryptedPrivateKey) {
+async function saveWallet(
+  discordId,
+  publicKey,
+  address,
+  encryptedPrivateKey = null
+) {
+  const pubkeyBuffer = ensurePublicKey(publicKey).toBuffer();
+  const walletAddress = ensureAddress(address);
+
+  // Verify the public key matches the address
+  if (new PublicKey(pubkeyBuffer).toString() !== walletAddress) {
+    throw new Error("Public key does not match address");
+  }
+
   const { error } = await supabase.from("users").upsert(
     {
       discord_id: discordId,
-      public_key: publicKey,
+      public_key: pubkeyBuffer,
+      address: walletAddress,
       encrypted_private_key: encryptedPrivateKey,
       created_at: new Date().toISOString(),
     },

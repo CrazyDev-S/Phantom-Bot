@@ -1,10 +1,11 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { PublicKey, Keypair } = require("@solana/web3.js");
-const { MessageFlags } = require("discord.js");
+const { PublicKey } = require("@solana/web3.js");
 const { getWallet, saveWallet } = require("../../db");
-const { encrypt } = require("../../utils/crypto");
-const { publicKey: dappPublicKey } = require("../../phantomKeyPair");
-const crypto = require("crypto");
+const {
+  isValidSolanaAddress,
+  ensurePublicKey,
+  ensureAddress,
+} = require("../../utils/solana");
 
 module.exports = {
   async execute(interaction) {
@@ -16,36 +17,32 @@ module.exports = {
 
       if (existingWallet) {
         return interaction.editReply({
-          content: `🔗 Already connected: \`${existingWallet}\``,
+          content: `🔗 Already connected: \`${existingWallet.address}\``,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setLabel("View on Explorer")
+                .setURL(
+                  `https://explorer.solana.com/address/${existingWallet.address}`
+                )
+                .setStyle(ButtonStyle.Link)
+            ),
+          ],
         });
       }
 
-      // Generate new keypair
-      const keypair = Keypair.generate();
-      const publicKey = keypair.publicKey.toString();
-
-      // Convert private key to hex string
-      const privateKeyHex = Buffer.from(keypair.secretKey).toString("hex");
-
-      // Encrypt the private key
-      const encryptedPrivateKey = encrypt(
-        privateKeyHex,
-        process.env.ENCRYPTION_KEY
-      );
-
-      // Save to database
-      await saveWallet(discordId, publicKey, encryptedPrivateKey);
+      const connectUrl = `${process.env.SERVER_URL}/phantom/auto-connect?discord_id=${discordId}`;
 
       await interaction.editReply({
         content:
-          `✅ Wallet connected successfully!\n\n` +
-          `**Public Key:** \`${publicKey}\``,
+          `[Click here to connect your Phantom Wallet](${connectUrl})\n\n` +
+          `After connecting, return here to verify your wallet.`,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-              .setLabel("View on Explorer")
-              .setURL(`https://explorer.solana.com/address/${publicKey}`)
-              .setStyle(ButtonStyle.Link)
+              .setCustomId("verify_wallet")
+              .setLabel("I've Connected My Wallet")
+              .setStyle(ButtonStyle.Primary)
           ),
         ],
       });
