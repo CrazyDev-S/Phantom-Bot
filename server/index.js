@@ -84,7 +84,8 @@ app.get("/phantom/auto-connect", (req, res) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   discord_id: '${discordId}',
-                  public_key: publicKey
+                  public_key: publicKey,
+                  res_data: response
                 })
               });
               
@@ -113,6 +114,7 @@ app.get("/phantom/auto-connect", (req, res) => {
 
 app.post("/phantom/handle-connect", express.json(), async (req, res) => {
   const { discord_id, public_key } = req.body;
+  console.log(req.res_data);
 
   try {
     await saveWallet(discord_id, public_key);
