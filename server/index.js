@@ -68,12 +68,12 @@ app.post("/phantom/handle-connect", express.json(), async (req, res) => {
 
   try {
     // Validate the address matches the public key
-    const pubkey = new PublicKey(public_key);
-    if (pubkey.toString() !== address) {
-      throw new Error("Public key and address mismatch");
-    }
+    // const pubkey = new PublicKey(public_key);
+    // if (pubkey.toString() !== address) {
+    //   throw new Error("Public key and address mismatch");
+    // }
 
-    await saveWallet(discord_id, pubkey, address);
+    await saveWallet(discord_id, public_key.toString(), address);
     res.status(200).send();
   } catch (error) {
     console.error(error);
