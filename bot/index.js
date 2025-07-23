@@ -5,7 +5,7 @@ const {
   REST,
   Routes,
   InteractionType,
-  ButtonStyle,
+  ComponentType,
 } = require("discord.js");
 const commands = require("./commands/index");
 const path = require("path");
@@ -40,18 +40,30 @@ client.once("ready", () => {
 // Enhanced interaction handler
 client.on("interactionCreate", async (interaction) => {
   try {
-    // Handle modal submissions FIRST
+    // Handle modal submissions
     if (interaction.type === InteractionType.ModalSubmit) {
       if (interaction.customId === "bundleModal") {
         require("./commands/bundle").handleModal(interaction);
       }
-      if (interaction.customId.startsWith("confirmBundle_")) {
+      return;
+    }
+
+    // Handle button interactions
+    if (interaction.isButton()) {
+      if (interaction.customId.startsWith("confirmBundle")) {
         require("./commands/bundle").handleConfirmation(interaction);
+      } else if (interaction.customId === "cancelBundle") {
+        await interaction.deferUpdate();
+        await interaction.editReply({
+          content: "❌ Transaction cancelled",
+          components: [],
+          embeds: [],
+        });
       }
       return;
     }
 
-    // Then handle slash commands
+    // Handle slash commands
     if (interaction.isCommand()) {
       const command = require(`./commands/${interaction.commandName}.js`);
       await command.execute(interaction);
@@ -59,11 +71,21 @@ client.on("interactionCreate", async (interaction) => {
     }
   } catch (error) {
     console.error("Interaction error:", error);
-    if (!interaction.replied) {
+
+    // Handle errors based on interaction state
+    if (!interaction.replied && !interaction.deferred) {
       await interaction
         .reply({
-          content: "An error occurred",
+          content: "⚠️ An error occurred processing your request",
           ephemeral: true,
+        })
+        .catch(console.error);
+    } else if (interaction.deferred) {
+      await interaction
+        .editReply({
+          content: "⚠️ An error occurred processing your request",
+          components: [],
+          embeds: [],
         })
         .catch(console.error);
     }

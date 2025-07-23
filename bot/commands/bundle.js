@@ -226,6 +226,14 @@ module.exports = {
       // Immediately defer the update
       await interaction.deferUpdate();
 
+      // Check if this is a cancellation
+      if (interaction.customId === "cancelBundle") {
+        return await interaction.editReply({
+          content: "❌ Transaction cancelled",
+          components: [],
+          embeds: [],
+        });
+      }
       // Extract data from the embed
       const originalEmbed = interaction.message.embeds[0];
       const fields = originalEmbed.data.fields;
