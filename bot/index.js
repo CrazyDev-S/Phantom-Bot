@@ -5,7 +5,6 @@ const {
   REST,
   Routes,
   InteractionType,
-  ComponentType,
 } = require("discord.js");
 const commands = require("./commands/index");
 const path = require("path");
@@ -86,6 +85,13 @@ client.on("interactionCreate", async (interaction) => {
           content: "⚠️ An error occurred processing your request",
           components: [],
           embeds: [],
+        })
+        .catch(console.error);
+    } else {
+      await interaction
+        .followUp({
+          content: "⚠️ An error occurred processing your request",
+          ephemeral: true,
         })
         .catch(console.error);
     }

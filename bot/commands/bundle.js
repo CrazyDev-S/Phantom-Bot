@@ -15,10 +15,17 @@ const {
   TransactionMessage,
   VersionedTransaction,
   Keypair,
-  sendAndConfirmTransaction,
 } = require("@solana/web3.js");
-const { getWallet, getWalletDetails, storeTransaction } = require("../../db");
-const { decrypt } = require("../../utils/crypto"); // You'll need to implement this
+const {
+  getWallet,
+  getWalletDetails,
+  storeTransaction,
+  createPendingTransaction,
+  getPendingTransaction,
+  deletePendingTransaction,
+} = require("../../db");
+const { decrypt } = require("../../utils/crypto");
+const crypto = require("crypto");
 
 // Constants
 const MAX_SOL_AMOUNT = 10;
@@ -142,6 +149,18 @@ module.exports = {
         throw new Error("FEE_CALCULATION_FAILED");
       }
 
+      // Create pending transaction in database
+      const transactionId = await createPendingTransaction({
+        discordId: interaction.user.id,
+        sender: sender.toString(),
+        recipient: recipient.toString(),
+        amount: solAmount,
+        fee: fee.value / LAMPORTS_PER_SOL,
+        blockhash,
+        lastValidBlockHeight,
+        lamports,
+      });
+
       // Create confirmation embed
       const confirmEmbed = new EmbedBuilder()
         .setTitle("⚠️ Confirm Transaction")
@@ -179,22 +198,9 @@ module.exports = {
           text: "Transaction will be signed with your connected wallet",
         });
 
-      // Store transaction data in customId for later retrieval
-      const transactionData = JSON.stringify({
-        sender: sender.toString(),
-        recipient: recipient.toString(),
-        amount: solAmount,
-        fee: fee.value / LAMPORTS_PER_SOL,
-        blockhash,
-        lastValidBlockHeight,
-        lamports,
-      });
-
       const confirmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(
-            `confirmBundle_${Buffer.from(transactionData).toString("base64")}`
-          )
+          .setCustomId(`confirmBundle_${transactionId}`) // Use short ID
           .setLabel("Confirm & Sign")
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
@@ -252,11 +258,14 @@ module.exports = {
         });
       }
 
-      // Extract transaction data from customId
-      const base64Data = interaction.customId.replace("confirmBundle_", "");
-      const transactionData = JSON.parse(
-        Buffer.from(base64Data, "base64").toString()
-      );
+      // Extract transaction ID from customId
+      const transactionId = interaction.customId.replace("confirmBundle_", "");
+
+      // Retrieve transaction data from database
+      const transactionData = await getPendingTransaction(transactionId);
+      if (!transactionData) {
+        throw new Error("Transaction data not found or expired");
+      }
 
       const {
         sender,
@@ -294,14 +303,14 @@ module.exports = {
         throw new Error("Wallet details not found");
       }
 
-      // Decrypt private key (you need to implement this)
+      // Decrypt private key
       const privateKey = decrypt(
         walletDetails.encryptedPrivateKey,
         process.env.ENCRYPTION_KEY
       );
 
       // Create keypair from decrypted private key
-      const keypair = Keypair.fromSecretKey(Uint8Array.from(privateKey));
+      const keypair = Keypair.fromSecretKey(Buffer.from(privateKey, "hex"));
 
       // Sign the transaction
       transaction.sign([keypair]);
@@ -329,6 +338,9 @@ module.exports = {
         recipientAddress: recipient,
         status: confirmation.value.err ? "failed" : "confirmed",
       });
+
+      // Delete pending transaction
+      await deletePendingTransaction(transactionId);
 
       // Create success embed
       const successEmbed = new EmbedBuilder()
