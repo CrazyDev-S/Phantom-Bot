@@ -1,10 +1,5 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { PublicKey, Keypair } = require("@solana/web3.js");
-const { MessageFlags } = require("discord.js");
-const { getWallet, saveWallet } = require("../../db");
+const { Keypair } = require("@solana/web3.js");
 const { encrypt } = require("../../utils/crypto");
-const { publicKey: dappPublicKey } = require("../../phantomKeyPair");
-const crypto = require("crypto");
 
 module.exports = {
   async execute(interaction) {
@@ -14,40 +9,38 @@ module.exports = {
       const discordId = interaction.user.id;
       const existingWallet = await getWallet(discordId);
 
-      // Check if already connected
       if (existingWallet) {
         return interaction.editReply({
           content: `🔗 Already connected: \`${existingWallet}\``,
         });
       }
 
-      // Generate a new keypair for the user
+      // Generate new keypair
       const keypair = Keypair.generate();
       const publicKey = keypair.publicKey.toString();
-      const privateKey = keypair.secretKey.toString("hex");
 
-      // Encrypt the private key before storing
+      // Convert private key to hex string
+      const privateKeyHex = Buffer.from(keypair.secretKey).toString("hex");
+
+      // Encrypt the private key
       const encryptedPrivateKey = encrypt(
-        privateKey,
+        privateKeyHex,
         process.env.ENCRYPTION_KEY
       );
 
-      // Save both public key and encrypted private key
+      // Save to database
       await saveWallet(discordId, publicKey, encryptedPrivateKey);
-
-      // Alternative Phantom connection handler
-      const connectUrl = `${process.env.SERVER_URL}/phantom/auto-connect?discord_id=${discordId}`;
 
       await interaction.editReply({
         content:
-          `[Click here to connect your Phantom Wallet](${connectUrl})\n\n` +
-          `After connecting, return here to verify your wallet.`,
+          `✅ Wallet connected successfully!\n\n` +
+          `**Public Key:** \`${publicKey}\``,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-              .setCustomId("verify_wallet")
-              .setLabel("I've Connected My Wallet")
-              .setStyle(ButtonStyle.Primary)
+              .setLabel("View on Explorer")
+              .setURL(`https://explorer.solana.com/address/${publicKey}`)
+              .setStyle(ButtonStyle.Link)
           ),
         ],
       });

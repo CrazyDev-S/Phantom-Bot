@@ -13,6 +13,7 @@ async function saveWallet(discordId, publicKey, encryptedPrivateKey) {
       discord_id: discordId,
       public_key: publicKey,
       encrypted_private_key: encryptedPrivateKey,
+      created_at: new Date().toISOString(),
     },
     { onConflict: "discord_id" }
   );

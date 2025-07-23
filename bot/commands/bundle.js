@@ -246,7 +246,6 @@ module.exports = {
 
   async handleConfirmation(interaction) {
     try {
-      // Immediately defer the update
       await interaction.deferUpdate();
 
       // Check if this is a cancellation
@@ -299,19 +298,23 @@ module.exports = {
 
       // Get user's encrypted private key from database
       const walletDetails = await getWalletDetails(interaction.user.id);
-      console.log("walletDetail", walletDetails);
       if (!walletDetails || !walletDetails.encrypted_private_key) {
         throw new Error("Wallet details not found");
       }
 
       // Decrypt private key
-      const privateKey = decrypt(
+      const decryptedPrivateKey = decrypt(
         walletDetails.encrypted_private_key,
         process.env.ENCRYPTION_KEY
       );
 
+      // Convert decrypted hex string to Uint8Array
+      const privateKeyUint8 = new Uint8Array(
+        decryptedPrivateKey.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
+      );
+
       // Create keypair from decrypted private key
-      const keypair = Keypair.fromSecretKey(Buffer.from(privateKey, "hex"));
+      const keypair = Keypair.fromSecretKey(privateKeyUint8);
 
       // Sign the transaction
       transaction.sign([keypair]);
