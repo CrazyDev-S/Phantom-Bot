@@ -34,13 +34,12 @@ module.exports = {
       const connectUrl = `${process.env.SERVER_URL}/phantom/auto-connect?discord_id=${discordId}`;
 
       await interaction.editReply({
-        content:
-          `[Click here to connect your Phantom Wallet](${connectUrl})\n\n` +
-          `After connecting, return here to verify your wallet.`,
+        content: `Click here to connect your Phantom Wallet\n\n`,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-              .setCustomId("verify_wallet")
+              .setCustomId("Connect Wallet")
+              .setURL(connectUrl)
               .setLabel("I've Connected My Wallet")
               .setStyle(ButtonStyle.Primary)
           ),

@@ -1,4 +1,10 @@
 const { createClient } = require("@supabase/supabase-js");
+const {
+  ensurePublicKey,
+  ensureAddress,
+  isValidSolanaAddress,
+} = require("../../utils/solana");
+const { PublicKey } = require("@solana/web3.js");
 require("dotenv").config();
 
 const supabase = createClient(
