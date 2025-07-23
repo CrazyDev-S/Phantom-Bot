@@ -299,7 +299,7 @@ module.exports = {
 
       // Get user's encrypted private key from database
       const walletDetails = await getWalletDetails(interaction.user.id);
-      print("walletDetail", walletDetails);
+      console.log("walletDetail", walletDetails);
       if (!walletDetails || !walletDetails.encryptedPrivateKey) {
         throw new Error("Wallet details not found");
       }
