@@ -1,6 +1,12 @@
+const express = require("express");
+const { saveWallet } = require("../db");
+const app = express();
+const cors = require("cors");
+
+// Add this at the top after express initialization
+app.use(cors());
 // Add this near the top
 const { PublicKey } = require("@solana/web3.js");
-const { ensurePublicKey, ensureAddress } = require("../utils/solana");
 
 // Updated auto-connect handler
 app.get("/phantom/auto-connect", (req, res) => {
