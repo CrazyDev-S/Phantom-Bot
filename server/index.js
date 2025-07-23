@@ -1,12 +1,18 @@
 const express = require("express");
+const bs58 = require("bs58");
+const nacl = require("tweetnacl");
 const { saveWallet } = require("../db");
+const { secretKey } = require("../phantomKeyPair");
 const app = express();
 const cors = require("cors");
 
 // Add this at the top after express initialization
 app.use(cors());
-// Add this near the top
-const { PublicKey } = require("@solana/web3.js");
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Phantom callback server running on port ${PORT}`);
+});
 
 // Updated auto-connect handler
 app.get("/phantom/auto-connect", (req, res) => {
