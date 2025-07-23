@@ -5,10 +5,11 @@ const { saveWallet } = require("../db");
 const { secretKey } = require("../phantomKeyPair");
 const app = express();
 const cors = require("cors");
+// Add this near the top
+const { PublicKey } = require("@solana/web3.js");
 
 // Add this at the top after express initialization
 app.use(cors());
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Phantom callback server running on port ${PORT}`);
